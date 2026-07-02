@@ -10,6 +10,7 @@ const SHEET_LOGS = 'logs';
 const SHEET_STATUS = 'current_status';
 const SHEET_USAGE_LOGS = 'usage_logs';
 const SHEET_USAGE_SUMMARY = 'usage_summary';
+const SHEET_USAGE_GUIDE = '説明書_利用監視';
 
 const TZ = 'Asia/Tokyo';// 通知対象にする経過時間
 const OVERDUE_HOURS = 24;
@@ -52,6 +53,7 @@ function doGet(e) {
 
 function setupApp() {
   setupSheets();
+  createUsageMonitoringGuideSheet();
   setupActiveStatusDropdowns();
   syncCurrentStatusFromUsers();
 
@@ -524,6 +526,78 @@ function ensureUsageMonitoringSheets_() {
   setHeaderIfEmpty_(usageSummarySheet, HEADERS.USAGE_SUMMARY);
   formatSheet_(usageLogSheet);
   formatSheet_(usageSummarySheet);
+  createUsageMonitoringGuideSheet();
+}
+
+function createUsageMonitoringGuideSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet_(ss, SHEET_USAGE_GUIDE);
+
+  const rows = [
+    ['タブレット管理アプリ 利用監視システム 説明書', ''],
+    ['', ''],
+    ['目的', '営業員がタブレット貸出・返却を会社指定のWebアプリで記録しているかを確認し、未利用または利用頻度が少ない営業員を洗い出すための仕組みです。'],
+    ['', ''],
+    ['見る場所', 'WebアプリのURL末尾に ?mode=admin を付けると管理者画面が開きます。管理者画面では現在の貸出状況と利用監視結果を確認できます。'],
+    ['保存場所', 'このスプレッドシートに利用ログと集計結果を保存します。'],
+    ['', ''],
+    ['主なシート', ''],
+    ['users', '営業員マスタです。名前、割当端末、本人メール、グループ、有効/無効を管理します。'],
+    ['groups', 'グループマスタです。リーダー名、リーダーメール、通知対象を管理します。'],
+    ['logs', '貸出・返却ボタンを押した実操作の履歴です。利用実績として最も信頼する集計元です。'],
+    ['usage_logs', '営業員画面を開いた履歴です。画面表示回数の集計元です。'],
+    ['usage_summary', '直近30日間の利用状況を営業員ごとに集計した結果です。'],
+    ['current_status', '現在の貸出状態を管理する補助シートです。'],
+    ['', ''],
+    ['usage_summary の集計元', ''],
+    ['営業員一覧', 'users シートから取得します。有効な営業員だけを対象にします。'],
+    ['貸出・返却操作回数', 'logs シートから直近30日分の「貸出」「返却」を集計します。'],
+    ['画面表示回数', 'usage_logs シートから直近30日分の「画面表示」を集計します。'],
+    ['最終利用日時', 'logs と usage_logs の直近30日データのうち、最も新しい日時を使います。'],
+    ['', ''],
+    ['判定基準', ''],
+    ['未利用', '直近30日間、画面表示も貸出・返却操作もありません。'],
+    ['操作なし', '画面表示はありますが、貸出・返却操作がありません。'],
+    ['低頻度', '直近30日間の画面表示・操作合計が3回未満です。'],
+    ['利用あり', '直近30日間に必要な利用実績があります。'],
+    ['', ''],
+    ['手動実行する関数', ''],
+    ['setupApp', '初期セットアップです。必要なシート、見出し、説明書シートを作成します。'],
+    ['rebuildUsageSummaryFromLogs', 'logs と usage_logs から直近30日間の利用状況を再集計し、usage_summary を作り直します。'],
+    ['createUsageMonitoringGuideSheet', 'この説明書シートを作成または更新します。'],
+    ['setWeeklyUsageMonitoringTrigger', '毎週月曜9時ごろに未利用・低頻度者レポートをリーダーへ送るトリガーを設定します。必要な場合だけ実行してください。'],
+    ['', ''],
+    ['運用メモ', 'usage_summary は管理者画面を開いた時にも更新されます。正確な一覧をすぐ見たい場合は rebuildUsageSummaryFromLogs を手動実行してください。'],
+    ['注意', 'この仕組みで分かるのは「Webアプリを使った記録」です。タブレット本体を実際に使ったかどうかを直接検知するものではありません。']
+  ];
+
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
+  sheet.clear();
+  sheet.getRange(1, 1, rows.length, 2).setValues(rows);
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 220);
+  sheet.setColumnWidth(2, 760);
+  sheet.getRange('A:B').setWrap(true).setVerticalAlignment('top');
+  sheet.getRange(1, 1, 1, 2)
+    .merge()
+    .setFontWeight('bold')
+    .setFontSize(14)
+    .setBackground('#e3f2fd');
+
+  const sectionRows = [3, 8, 16, 22, 29, 35, 36];
+
+  sectionRows.forEach(rowNumber => {
+    sheet.getRange(rowNumber, 1, 1, 2)
+      .setFontWeight('bold')
+      .setBackground('#f1f5f9');
+  });
+
+  sheet.getRange(1, 1, rows.length, 2).setBorder(true, true, true, true, true, true);
+
+  return {
+    success: true,
+    message: `${SHEET_USAGE_GUIDE} シートを作成または更新しました。`
+  };
 }
 
 function buildRecentUsageMap_(days) {
