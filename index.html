@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+
+    <style>
+      :root {
+        --bg: #f4f7f6;
+        --card: #ffffff;
+        --text: #222;
+        --muted: #777;
+        --blue: #007bff;
+        --blue-dark: #0056b3;
+        --orange: #ff9800;
+        --orange-dark: #e65100;
+        --green: #15a05f;
+        --red: #e53935;
+        --border: #e5e7eb;
+        --shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        margin: 0;
+        padding: 20px;
+        min-height: 100vh;
+      }
+
+      .page {
+        width: 100%;
+        max-width: 720px;
+        margin: 0 auto;
+      }
+
+      .card {
+        background: var(--card);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+        width: 100%;
+        padding: 28px 20px;
+        margin-bottom: 18px;
+      }
+
+      .center {
+        text-align: center;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      h1 {
+        font-size: 1.2rem;
+        color: var(--muted);
+        margin: 0 0 6px;
+      }
+
+      h2 {
+        font-size: 1.8rem;
+        margin: 8px 0 14px;
+        font-weight: 800;
+      }
+
+      h3 {
+        font-size: 1.1rem;
+        margin: 0 0 14px;
+      }
+
+      p {
+        line-height: 1.7;
+      }
+
+      .loading {
+        color: var(--muted);
+        text-align: center;
+        margin-top: 80px;
+        font-weight: 700;
+      }
+
+      select {
+        width: 100%;
+        padding: 16px;
+        font-size: 1.1rem;
+        margin: 14px 0 20px;
+        border-radius: 10px;
+        border: 1px solid #ddd;
+        background: #fff;
+      }
+
+      .device-info {
+        background: #e3f2fd;
+        color: #0d47a1;
+        padding: 18px;
+        border-radius: 12px;
+        margin: 22px 0;
+      }
+
+      .device-label {
+        font-size: 0.9rem;
+        display: block;
+        margin-bottom: 6px;
+        opacity: 0.8;
+      }
+
+      .device-id {
+        font-size: 2.6rem;
+        font-weight: 900;
+        display: block;
+        letter-spacing: 1px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        font-weight: 800;
+        font-size: 0.95rem;
+        margin-top: 4px;
+      }
+
+      .status-borrowing {
+        background: #fff3e0;
+        color: #e65100;
+      }
+
+      .status-returned {
+        background: #e8f5e9;
+        color: #1b7f3a;
+      }
+
+      .btn {
+        display: block;
+        width: 100%;
+        padding: 22px 18px;
+        font-size: 1.45rem;
+        font-weight: 900;
+        color: white;
+        border: none;
+        border-radius: 14px;
+        cursor: pointer;
+        margin-top: 14px;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.08s, opacity 0.2s;
+      }
+
+      .btn:active {
+        transform: scale(0.98);
+      }
+
+      .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .btn-borrow {
+        background: var(--blue);
+        box-shadow: 0 5px 0 var(--blue-dark);
+      }
+
+      .btn-return {
+        background: var(--orange);
+        box-shadow: 0 5px 0 var(--orange-dark);
+      }
+
+      .btn-sub {
+        background: #455a64;
+        box-shadow: 0 5px 0 #263238;
+        font-size: 1.05rem;
+        padding: 15px;
+      }
+
+      .reset-link {
+        margin-top: 28px;
+        font-size: 0.85rem;
+        color: #999;
+        text-decoration: underline;
+        cursor: pointer;
+      }
+
+      .small-note {
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin-top: 14px;
+      }
+
+      .complete-box {
+        background: #eef9f2;
+        border: 1px solid #b8e5c7;
+        color: #146c36;
+        border-radius: 12px;
+        padding: 14px;
+        margin-top: 18px;
+        font-weight: 800;
+      }
+
+      .error-box {
+        background: #fff2f2;
+        border: 1px solid #ffc7c7;
+        color: #b71c1c;
+        border-radius: 12px;
+        padding: 14px;
+        margin-top: 18px;
+        font-weight: 800;
+      }
+
+      .top-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .top-title {
+        font-weight: 900;
+        font-size: 1.25rem;
+      }
+
+      .admin-link {
+        font-size: 0.85rem;
+        color: #666;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .summary-card {
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px 10px;
+        text-align: center;
+      }
+
+      .summary-number {
+        font-size: 1.7rem;
+        font-weight: 900;
+      }
+
+      .summary-label {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      .section-title {
+        margin: 22px 0 10px;
+        font-size: 1.05rem;
+        font-weight: 900;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        background: white;
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+        margin-bottom: 18px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 620px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--border);
+        padding: 12px 10px;
+        text-align: left;
+        font-size: 0.9rem;
+        white-space: nowrap;
+      }
+
+      th {
+        background: #e3f2fd;
+        font-weight: 900;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      .badge {
+        display: inline-flex;
+        padding: 5px 9px;
+        border-radius: 999px;
+        font-weight: 800;
+        font-size: 0.8rem;
+      }
+
+      .badge-danger {
+        background: #ffebee;
+        color: #c62828;
+      }
+
+      .badge-ok {
+        background: #e8f5e9;
+        color: #2e7d32;
+      }
+
+      .badge-warn {
+        background: #fff8e1;
+        color: #ef6c00;
+      }
+
+      .usage-note {
+        color: var(--muted);
+        font-size: 0.86rem;
+        margin: -4px 0 10px;
+      }
+
+      .empty {
+        color: var(--muted);
+        text-align: center;
+        padding: 24px;
+        background: white;
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+      }
+
+      @media (max-width: 480px) {
+        body {
+          padding: 14px;
+        }
+
+        .card {
+          padding: 24px 18px;
+        }
+
+        .device-id {
+          font-size: 2.2rem;
+        }
+
+        .btn {
+          font-size: 1.35rem;
+          padding: 20px 16px;
+        }
+
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <script>
+      const APP_MODE = '<?= mode ?>';
+    </script>
+
+    <div class="page">
+      <div id="view-loading" class="loading">読み込み中...</div>
+
+      <!-- 営業員：初期設定 -->
+      <div id="view-register" class="card center hidden">
+        <h2>初期設定</h2>
+        <p>あなたの名前を選択してください。</p>
+
+        <select id="user-select">
+          <option value="">読込中...</option>
+        </select>
+
+        <button class="btn btn-borrow" onclick="saveUser()">決定して次へ</button>
+
+        <p class="small-note">
+          初回のみ設定します。次回からは自動で表示されます。
+        </p>
+      </div>
+
+      <!-- 営業員：メイン画面 -->
+      <div id="view-main" class="card center hidden">
+        <h1>お疲れ様です</h1>
+        <h2 id="display-name">名前</h2>
+
+        <div class="device-info">
+          <span class="device-label">あなたの担当端末</span>
+          <span id="display-device" class="device-id">---</span>
+        </div>
+
+        <div id="status-area"></div>
+
+        <div id="action-area">
+          <button id="btn-borrow" class="btn btn-borrow hidden" onclick="doAction('貸出')">
+            借りる
+          </button>
+
+          <button id="btn-return" class="btn btn-return hidden" onclick="doAction('返却')">
+            返却する
+          </button>
+        </div>
+
+        <div id="message-area"></div>
+
+        <div class="reset-link" onclick="resetUser()">名前を選び直す</div>
+      </div>
+
+      <!-- 管理者画面 -->
+      <div id="view-admin" class="hidden">
+        <div class="top-bar">
+          <div class="top-title">タブレット管理画面</div>
+          <a class="admin-link" href="?">営業員画面へ</a>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div id="summary-total" class="summary-number">0</div>
+            <div class="summary-label">登録端末</div>
+          </div>
+
+          <div class="summary-card">
+            <div id="summary-borrowing" class="summary-number">0</div>
+            <div class="summary-label">貸出中</div>
+          </div>
+
+          <div class="summary-card">
+            <div id="summary-returned" class="summary-number">0</div>
+            <div class="summary-label">返却済</div>
+          </div>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div id="usage-target-users" class="summary-number">0</div>
+            <div class="summary-label">監視対象</div>
+          </div>
+
+          <div class="summary-card">
+            <div id="usage-no-use" class="summary-number">0</div>
+            <div class="summary-label">未利用</div>
+          </div>
+
+          <div class="summary-card">
+            <div id="usage-low-use" class="summary-number">0</div>
+            <div class="summary-label">低頻度・操作なし</div>
+          </div>
+        </div>
+
+        <button class="btn btn-sub" onclick="loadAdminDashboard()">
+          最新状態に更新
+        </button>
+
+        <div class="section-title">現在貸出中</div>
+        <div id="admin-borrowing"></div>
+
+        <div class="section-title">利用監視</div>
+        <div id="usage-monitor-note" class="usage-note"></div>
+        <div id="admin-usage-monitor"></div>
+
+        <div class="section-title">返却済み</div>
+        <div id="admin-returned"></div>
+      </div>
+    </div>
+
+    <script>
+      window.onload = function() {
+        if (APP_MODE === 'admin') {
+          showAdmin();
+          return;
+        }
+
+        const savedName = localStorage.getItem('tablog_username');
+
+        if (savedName) {
+          showMain(savedName);
+        } else {
+          showRegister();
+        }
+      };
+
+      // ==============================
+      // 営業員画面
+      // ==============================
+
+      function showRegister() {
+        showOnly('view-register');
+
+        google.script.run
+          .withSuccessHandler(function(list) {
+            const select = document.getElementById('user-select');
+
+            select.innerHTML = '<option value="" disabled selected>選択してください</option>';
+
+            list.forEach(function(name) {
+              const option = document.createElement('option');
+              option.value = name;
+              option.textContent = name;
+              select.appendChild(option);
+            });
+          })
+          .withFailureHandler(function(error) {
+            showError('view-register', error.message || error);
+          })
+          .getUserList();
+      }
+
+      function saveUser() {
+        const select = document.getElementById('user-select');
+        const name = select.value;
+
+        if (!name) {
+          alert('名前を選択してください');
+          return;
+        }
+
+        localStorage.setItem('tablog_username', name);
+        showMain(name);
+      }
+
+      function showMain(name) {
+        showOnly('view-loading');
+
+        document.getElementById('display-name').textContent = name + ' さん';
+
+        google.script.run
+          .withSuccessHandler(function(info) {
+            if (!info || !info.found) {
+              showOnly('view-register');
+              showError('view-register', info && info.message ? info.message : 'ユーザー情報が取得できませんでした。');
+              localStorage.removeItem('tablog_username');
+              return;
+            }
+
+            renderUserInfo(info);
+            showOnly('view-main');
+          })
+          .withFailureHandler(function(error) {
+            showOnly('view-main');
+            showError('message-area', error.message || error);
+          })
+          .getUserInfo(name);
+      }
+
+      function renderUserInfo(info) {
+        document.getElementById('display-name').textContent = info.name + ' さん';
+        document.getElementById('display-device').textContent = info.device || '未登録';
+
+        const statusArea = document.getElementById('status-area');
+        const btnBorrow = document.getElementById('btn-borrow');
+        const btnReturn = document.getElementById('btn-return');
+        const messageArea = document.getElementById('message-area');
+
+        messageArea.innerHTML = '';
+
+        if (info.currentStatus === '貸出中') {
+          statusArea.innerHTML = `
+            <div class="status-pill status-borrowing">現在：貸出中</div>
+            <p class="small-note">貸出日時：${escapeHtml(info.borrowAt || '-')}</p>
+          `;
+
+          btnBorrow.classList.add('hidden');
+          btnReturn.classList.remove('hidden');
+        } else {
+          statusArea.innerHTML = `
+            <div class="status-pill status-returned">現在：返却済</div>
+            <p class="small-note">次に利用する場合は「借りる」を押してください。</p>
+          `;
+
+          btnBorrow.classList.remove('hidden');
+          btnReturn.classList.add('hidden');
+        }
+      }
+
+      function doAction(actionType) {
+        const name = localStorage.getItem('tablog_username');
+
+        if (!name) {
+          showRegister();
+          return;
+        }
+
+        setActionButtonsDisabled(true);
+
+        const messageArea = document.getElementById('message-area');
+        messageArea.innerHTML = '';
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            setActionButtonsDisabled(false);
+
+            if (!result || !result.success) {
+              showError('message-area', '処理に失敗しました。');
+              return;
+            }
+
+            renderUserInfo(result.info);
+
+            messageArea.innerHTML = `
+              <div class="complete-box">
+                ${escapeHtml(result.message)}
+              </div>
+            `;
+          })
+          .withFailureHandler(function(error) {
+            setActionButtonsDisabled(false);
+            showError('message-area', error.message || error);
+          })
+          .recordLog(name, actionType);
+      }
+
+      function setActionButtonsDisabled(disabled) {
+        document.getElementById('btn-borrow').disabled = disabled;
+        document.getElementById('btn-return').disabled = disabled;
+      }
+
+      function resetUser() {
+        const result = confirm('ユーザー設定を解除しますか？');
+
+        if (!result) return;
+
+        localStorage.removeItem('tablog_username');
+        showRegister();
+      }
+
+      // ==============================
+      // 管理者画面
+      // ==============================
+
+      function showAdmin() {
+        showOnly('view-admin');
+        loadAdminDashboard();
+      }
+
+      function loadAdminDashboard() {
+        document.getElementById('admin-borrowing').innerHTML = '<div class="empty">読み込み中...</div>';
+        document.getElementById('admin-returned').innerHTML = '<div class="empty">読み込み中...</div>';
+
+        google.script.run
+          .withSuccessHandler(function(data) {
+            renderAdminDashboard(data);
+          })
+          .withFailureHandler(function(error) {
+            document.getElementById('admin-borrowing').innerHTML =
+              `<div class="error-box">${escapeHtml(error.message || error)}</div>`;
+          })
+          .getAdminDashboard();
+      }
+
+      function renderAdminDashboard(data) {
+        document.getElementById('summary-total').textContent = data.summary.total;
+        document.getElementById('summary-borrowing').textContent = data.summary.borrowing;
+        document.getElementById('summary-returned').textContent = data.summary.returned;
+
+        renderBorrowingTable(data.borrowing || []);
+        renderUsageMonitoring(data.usage || {});
+        renderReturnedTable(data.returned || []);
+      }
+
+      function renderUsageMonitoring(usage) {
+        const summary = usage.summary || {};
+        const rows = usage.rows || [];
+
+        document.getElementById('usage-target-users').textContent = summary.targetUsers || 0;
+        document.getElementById('usage-no-use').textContent = summary.noUse || 0;
+        document.getElementById('usage-low-use').textContent =
+          Number(summary.lowUse || 0) + Number(summary.noAction || 0);
+
+        document.getElementById('usage-monitor-note').textContent =
+          `直近${usage.days || 30}日間のアプリ表示・貸出返却操作を集計しています。`;
+
+        const targetRows = rows.filter(function(row) {
+          return row.judgementLevel !== 'ok';
+        });
+
+        const area = document.getElementById('admin-usage-monitor');
+
+        if (!targetRows.length) {
+          area.innerHTML = '<div class="empty">未利用・低頻度の営業員はいません。</div>';
+          return;
+        }
+
+        let html = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>判定</th>
+                  <th>名前</th>
+                  <th>グループ</th>
+                  <th>端末</th>
+                  <th>最終利用</th>
+                  <th>表示回数</th>
+                  <th>操作回数</th>
+                  <th>備考</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        targetRows.forEach(row => {
+          const badgeClass = row.judgementLevel === 'danger' ? 'badge-danger' : 'badge-warn';
+
+          html += `
+            <tr>
+              <td><span class="badge ${badgeClass}">${escapeHtml(row.judgement)}</span></td>
+              <td>${escapeHtml(row.name)}</td>
+              <td>${escapeHtml(row.group || '-')}</td>
+              <td>${escapeHtml(row.device || '-')}</td>
+              <td>${escapeHtml(row.lastUsedAt || '-')}</td>
+              <td>${escapeHtml(row.openCount)}</td>
+              <td>${escapeHtml(row.actionCount)}</td>
+              <td>${escapeHtml(row.note || '-')}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        area.innerHTML = html;
+      }
+
+      function renderBorrowingTable(rows) {
+        const area = document.getElementById('admin-borrowing');
+
+        if (!rows.length) {
+          area.innerHTML = '<div class="empty">現在、貸出中の端末はありません。</div>';
+          return;
+        }
+
+        let html = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>状態</th>
+                  <th>名前</th>
+                  <th>端末</th>
+                  <th>貸出日時</th>
+                  <th>経過時間</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        rows.forEach(row => {
+          html += `
+            <tr>
+              <td><span class="badge badge-danger">貸出中</span></td>
+              <td>${escapeHtml(row.name)}</td>
+              <td>${escapeHtml(row.device)}</td>
+              <td>${escapeHtml(row.borrowAt || '-')}</td>
+              <td>${escapeHtml(row.elapsed || '-')}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        area.innerHTML = html;
+      }
+
+      function renderReturnedTable(rows) {
+        const area = document.getElementById('admin-returned');
+
+        if (!rows.length) {
+          area.innerHTML = '<div class="empty">返却済みのデータはありません。</div>';
+          return;
+        }
+
+        let html = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>状態</th>
+                  <th>名前</th>
+                  <th>端末</th>
+                  <th>貸出日時</th>
+                  <th>返却日時</th>
+                  <th>最終更新</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        rows.forEach(row => {
+          html += `
+            <tr>
+              <td><span class="badge badge-ok">返却済</span></td>
+              <td>${escapeHtml(row.name)}</td>
+              <td>${escapeHtml(row.device)}</td>
+              <td>${escapeHtml(row.borrowAt || '-')}</td>
+              <td>${escapeHtml(row.returnAt || '-')}</td>
+              <td>${escapeHtml(row.updatedAt || '-')}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        area.innerHTML = html;
+      }
+
+      // ==============================
+      // 共通
+      // ==============================
+
+      function showOnly(id) {
+        const views = [
+          'view-loading',
+          'view-register',
+          'view-main',
+          'view-admin'
+        ];
+
+        views.forEach(function(viewId) {
+          document.getElementById(viewId).classList.add('hidden');
+        });
+
+        document.getElementById(id).classList.remove('hidden');
+      }
+
+      function showError(targetId, message) {
+        const target = document.getElementById(targetId);
+
+        target.innerHTML += `
+          <div class="error-box">
+            ${escapeHtml(message)}
+          </div>
+        `;
+      }
+
+      function escapeHtml(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+    </script>
+  </body>
+</html>
