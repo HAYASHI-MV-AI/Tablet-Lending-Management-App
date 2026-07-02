@@ -527,16 +527,24 @@ function ensureUsageMonitoringSheets_() {
 }
 
 function buildRecentUsageMap_(days) {
-  const sheet = getSheet_(SHEET_USAGE_LOGS);
-  const lastRow = sheet.getLastRow();
   const map = {};
-
-  if (lastRow < 2) return map;
-
-  const values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
   const since = new Date();
   since.setDate(since.getDate() - days);
   since.setHours(0, 0, 0, 0);
+
+  appendRecentScreenViewCounts_(map, since);
+  appendRecentActionCountsFromLogs_(map, since);
+
+  return map;
+}
+
+function appendRecentScreenViewCounts_(map, since) {
+  const sheet = getSheet_(SHEET_USAGE_LOGS);
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) return;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
 
   values.forEach(row => {
     const usedAt = row[0];
@@ -546,27 +554,56 @@ function buildRecentUsageMap_(days) {
     if (!name) return;
     if (!(usedAt instanceof Date)) return;
     if (usedAt < since) return;
+    if (operation !== '画面表示') return;
 
-    if (!map[name]) {
-      map[name] = {
-        lastUsedAt: null,
-        openCount: 0,
-        actionCount: 0
-      };
+    const usage = getOrCreateUsageStats_(map, name);
+
+    if (!usage.lastUsedAt || usedAt > usage.lastUsedAt) {
+      usage.lastUsedAt = usedAt;
     }
 
-    if (!map[name].lastUsedAt || usedAt > map[name].lastUsedAt) {
-      map[name].lastUsedAt = usedAt;
-    }
-
-    if (operation === '画面表示') {
-      map[name].openCount += 1;
-    } else {
-      map[name].actionCount += 1;
-    }
+    usage.openCount += 1;
   });
+}
 
-  return map;
+function appendRecentActionCountsFromLogs_(map, since) {
+  const sheet = getSheet_(SHEET_LOGS);
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) return;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+
+  values.forEach(row => {
+    const usedAt = row[0];
+    const name = String(row[1] || '').trim();
+    const action = normalizeAction_(row[3]);
+
+    if (!name) return;
+    if (!action) return;
+    if (!(usedAt instanceof Date)) return;
+    if (usedAt < since) return;
+
+    const usage = getOrCreateUsageStats_(map, name);
+
+    if (!usage.lastUsedAt || usedAt > usage.lastUsedAt) {
+      usage.lastUsedAt = usedAt;
+    }
+
+    usage.actionCount += 1;
+  });
+}
+
+function getOrCreateUsageStats_(map, name) {
+  if (!map[name]) {
+    map[name] = {
+      lastUsedAt: null,
+      openCount: 0,
+      actionCount: 0
+    };
+  }
+
+  return map[name];
 }
 
 function getUsageJudgement_(usage) {
@@ -589,11 +626,11 @@ function getUsageJudgement_(usage) {
     };
   }
 
-  if (openCount < LOW_USAGE_OPEN_THRESHOLD) {
+  if (openCount + actionCount < LOW_USAGE_OPEN_THRESHOLD) {
     return {
       label: '低頻度',
       level: 'warn',
-      note: `${USAGE_MONITOR_DAYS}日間の表示回数が${LOW_USAGE_OPEN_THRESHOLD}回未満です。`
+      note: `${USAGE_MONITOR_DAYS}日間の表示・操作合計が${LOW_USAGE_OPEN_THRESHOLD}回未満です。`
     };
   }
 
@@ -625,6 +662,19 @@ function rebuildUsageSummarySheet_(rows) {
   }
 
   formatSheet_(sheet);
+}
+
+// 手動実行用：usage_logs と logs から直近30日分を再集計する
+function rebuildUsageSummaryFromLogs() {
+  ensureUsageMonitoringSheets_();
+  const monitoring = getUsageMonitoringData_();
+  rebuildUsageSummarySheet_(monitoring.rows);
+
+  return {
+    success: true,
+    message: `直近${monitoring.days}日間の利用状況を usage_summary に再集計しました。`,
+    summary: monitoring.summary
+  };
 }
 
 function syncCurrentStatusFromUsers() {
