@@ -224,18 +224,29 @@ function getUserInfo(userName) {
     };
   }
 
-  appendUsageLog_(user.name, '画面表示', '営業員画面を表示');
+  appendUsageLog_(user.name, '画面表示', '営業員画面を表示', '', user);
+
+  return buildUserInfo_(user);
+}
+
+function buildUserInfo_(user) {
+  const statusMap = getCurrentStatusMapForUser_(user.name);
 
   return {
     found: true,
     name: user.name,
     group: user.group,
     assets: getAssignedAssets_(user).map(asset => {
-      let status = getCurrentStatus_(user.name, asset.type);
+      let status = statusMap[asset.type];
 
       if (!status) {
         createInitialStatusRow_(user.name, asset.id, asset.type);
-        status = getCurrentStatus_(user.name, asset.type);
+        status = {
+          currentStatus: '返却済',
+          borrowAt: '',
+          returnAt: '',
+          updatedAt: ''
+        };
       }
 
       const isBorrowing = status && status.currentStatus === '貸出中';
@@ -273,7 +284,8 @@ function recordLog(userName, assetType, action) {
       throw new Error('不正な備品種別です。');
     }
 
-    const user = findUser_(userName);
+    const usersMap = getUsersMap_();
+    const user = usersMap[String(userName || '').trim()];
 
     if (!user) {
       throw new Error('ユーザーが見つかりません。');
@@ -285,7 +297,11 @@ function recordLog(userName, assetType, action) {
       throw new Error(`${normalizedAssetType}は割り当てられていません。`);
     }
 
-    const duplicateOwner = findDuplicateAssetOwner_(user.name, asset);
+    const duplicateOwner = findDuplicateAssetOwner_(
+      user.name,
+      asset,
+      Object.values(usersMap)
+    );
 
     if (duplicateOwner) {
       throw new Error(
@@ -318,12 +334,19 @@ function recordLog(userName, assetType, action) {
     ]);
 
     // アプリ利用状況の監視ログにも記録する
-    appendUsageLog_(user.name, normalizedAction, '貸出・返却ボタン操作', normalizedAssetType);
+    appendUsageLog_(
+      user.name,
+      normalizedAction,
+      '貸出・返却ボタン操作',
+      normalizedAssetType,
+      user
+    );
 
     // 2. current_status を更新
     updateCurrentStatus_(user.name, asset.id, normalizedAssetType, normalizedAction, now);
 
-    const info = getUserInfo(user.name);
+    // 操作後は利用者・画面表示ログを取り直さず、状態だけを一括取得する
+    const info = buildUserInfo_(user);
 
     return {
       success: true,
@@ -428,8 +451,8 @@ function getAssignedAssets_(user) {
   return assets;
 }
 
-function findDuplicateAssetOwner_(userName, asset) {
-  const users = Object.values(getUsersMap_());
+function findDuplicateAssetOwner_(userName, asset, knownUsers) {
+  const users = knownUsers || Object.values(getUsersMap_());
 
   for (let i = 0; i < users.length; i++) {
     const user = users[i];
@@ -594,10 +617,9 @@ function getUsageMonitoringData_() {
   };
 }
 
-function appendUsageLog_(userName, operation, note, assetType) {
+function appendUsageLog_(userName, operation, note, assetType, knownUser) {
   try {
-    ensureUsageMonitoringSheets_();
-    const user = findUser_(userName);
+    const user = knownUser || findUser_(userName);
     if (!user) return;
 
     const sheet = getSheet_(SHEET_USAGE_LOGS);
@@ -619,14 +641,22 @@ function appendUsageLog_(userName, operation, note, assetType) {
 
 function ensureUsageMonitoringSheets_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const usageLogSheet = getOrCreateSheet_(ss, SHEET_USAGE_LOGS);
-  const usageSummarySheet = getOrCreateSheet_(ss, SHEET_USAGE_SUMMARY);
+  let usageLogSheet = ss.getSheetByName(SHEET_USAGE_LOGS);
+  let usageSummarySheet = ss.getSheetByName(SHEET_USAGE_SUMMARY);
 
-  setHeaderIfEmpty_(usageLogSheet, HEADERS.USAGE_LOGS);
-  setHeaderIfEmpty_(usageSummarySheet, HEADERS.USAGE_SUMMARY);
-  formatSheet_(usageLogSheet);
-  formatSheet_(usageSummarySheet);
-  createUsageMonitoringGuideSheet();
+  // 通常利用時は既存シートに一切書き込まない。
+  // シートが欠けている場合だけ作成・整形する。
+  if (!usageLogSheet) {
+    usageLogSheet = ss.insertSheet(SHEET_USAGE_LOGS);
+    setHeaderIfEmpty_(usageLogSheet, HEADERS.USAGE_LOGS);
+    formatSheet_(usageLogSheet);
+  }
+
+  if (!usageSummarySheet) {
+    usageSummarySheet = ss.insertSheet(SHEET_USAGE_SUMMARY);
+    setHeaderIfEmpty_(usageSummarySheet, HEADERS.USAGE_SUMMARY);
+    formatSheet_(usageSummarySheet);
+  }
 }
 
 function createUsageMonitoringGuideSheet() {
@@ -817,7 +847,7 @@ function getUsageJudgement_(usage) {
 
 function rebuildUsageSummarySheet_(rows) {
   const sheet = getSheet_(SHEET_USAGE_SUMMARY);
-  sheet.clear();
+  sheet.clearContents();
   sheet.getRange(1, 1, 1, HEADERS.USAGE_SUMMARY.length).setValues([HEADERS.USAGE_SUMMARY]);
 
   const values = rows.map(row => [
@@ -835,7 +865,6 @@ function rebuildUsageSummarySheet_(rows) {
     sheet.getRange(2, 1, values.length, HEADERS.USAGE_SUMMARY.length).setValues(values);
   }
 
-  formatSheet_(sheet);
 }
 
 // 手動実行用：usage_logs と logs から直近30日分を再集計する
@@ -859,6 +888,20 @@ function syncCurrentStatusFromUsers() {
   if (userLastRow < 2) return;
 
   const users = userSheet.getRange(2, 1, userLastRow - 1, 6).getDisplayValues();
+  const statusLastRow = statusSheet.getLastRow();
+  const statusValues = statusLastRow >= 2
+    ? statusSheet.getRange(2, 1, statusLastRow - 1, 8).getValues()
+    : [];
+  const statusRowIndexes = {};
+  const newRows = [];
+
+  statusValues.forEach((row, index) => {
+    const name = String(row[0] || '').trim();
+    if (!name) return;
+
+    const assetType = normalizeAssetType_(row[7]) || ASSET_TABLET;
+    statusRowIndexes[`${name}|${assetType}`] = index;
+  });
 
   users.forEach(row => {
     const name = String(row[0] || '').trim();
@@ -873,16 +916,36 @@ function syncCurrentStatusFromUsers() {
     };
 
     getAssignedAssets_(user).forEach(asset => {
-      const existingRow = findStatusRow_(statusSheet, name, asset.type);
+      const key = `${name}|${asset.type}`;
+      const existingIndex = statusRowIndexes[key];
 
-      if (existingRow === -1) {
-        createInitialStatusRow_(name, asset.id, asset.type);
+      if (existingIndex === undefined) {
+        newRows.push([
+          name,
+          asset.id,
+          '返却済',
+          '',
+          '',
+          '',
+          false,
+          asset.type
+        ]);
       } else {
-        statusSheet.getRange(existingRow, 2).setValue(asset.id);
-        statusSheet.getRange(existingRow, 8).setValue(asset.type);
+        statusValues[existingIndex][1] = asset.id;
+        statusValues[existingIndex][7] = asset.type;
       }
     });
   });
+
+  if (statusValues.length > 0) {
+    statusSheet.getRange(2, 1, statusValues.length, 8).setValues(statusValues);
+  }
+
+  if (newRows.length > 0) {
+    statusSheet
+      .getRange(statusValues.length + 2, 1, newRows.length, 8)
+      .setValues(newRows);
+  }
 }
 
 // ==============================
@@ -1236,6 +1299,36 @@ function getCurrentStatus_(name, assetType) {
     overdue: row[6],
     assetType: normalizeAssetType_(row[7]) || ASSET_TABLET
   };
+}
+
+function getCurrentStatusMapForUser_(name) {
+  const targetName = String(name || '').trim();
+  const sheet = getSheet_(SHEET_STATUS);
+  const lastRow = sheet.getLastRow();
+  const map = {};
+
+  if (!targetName || lastRow < 2) return map;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+
+  values.forEach(row => {
+    if (String(row[0] || '').trim() !== targetName) return;
+
+    const assetType = normalizeAssetType_(row[7]) || ASSET_TABLET;
+
+    map[assetType] = {
+      name: row[0],
+      device: row[1],
+      currentStatus: row[2],
+      borrowAt: row[3],
+      returnAt: row[4],
+      updatedAt: row[5],
+      overdue: row[6],
+      assetType: assetType
+    };
+  });
+
+  return map;
 }
 
 function createInitialStatusRow_(name, device, assetType) {
