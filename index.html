@@ -102,6 +102,32 @@
         margin: 22px 0;
       }
 
+      .asset-grid {
+        display: grid;
+        gap: 16px;
+        margin-top: 22px;
+      }
+
+      .asset-card {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 18px;
+        text-align: center;
+      }
+
+      .asset-type {
+        color: var(--muted);
+        font-size: 0.9rem;
+        font-weight: 800;
+      }
+
+      .asset-id {
+        color: #0d47a1;
+        font-size: 2rem;
+        font-weight: 900;
+        margin: 6px 0 12px;
+      }
+
       .device-label {
         font-size: 0.9rem;
         display: block;
@@ -323,6 +349,28 @@
         margin: -4px 0 10px;
       }
 
+      .filter-row {
+        display: flex;
+        gap: 8px;
+        margin: 12px 0 16px;
+      }
+
+      .filter-btn {
+        flex: 1;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        background: #fff;
+        color: #455a64;
+        cursor: pointer;
+        font-weight: 800;
+        padding: 11px 8px;
+      }
+
+      .filter-btn.active {
+        background: #455a64;
+        color: #fff;
+      }
+
       .empty {
         color: var(--muted);
         text-align: center;
@@ -386,23 +434,7 @@
         <h1>お疲れ様です</h1>
         <h2 id="display-name">名前</h2>
 
-        <div class="device-info">
-          <span class="device-label">あなたの担当端末</span>
-          <span id="display-device" class="device-id">---</span>
-        </div>
-
-        <div id="status-area"></div>
-
-        <div id="action-area">
-          <button id="btn-borrow" class="btn btn-borrow hidden" onclick="doAction('貸出')">
-            借りる
-          </button>
-
-          <button id="btn-return" class="btn btn-return hidden" onclick="doAction('返却')">
-            返却する
-          </button>
-        </div>
-
+        <div id="asset-list" class="asset-grid"></div>
         <div id="message-area"></div>
 
         <div class="reset-link" onclick="resetUser()">名前を選び直す</div>
@@ -411,8 +443,25 @@
       <!-- 管理者画面 -->
       <div id="view-admin" class="hidden">
         <div class="top-bar">
-          <div class="top-title">タブレット管理画面</div>
+          <div class="top-title">備品貸出管理画面</div>
           <a class="admin-link" href="?">営業員画面へ</a>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div id="summary-tablets" class="summary-number">0</div>
+            <div class="summary-label">タブレット</div>
+          </div>
+          <div class="summary-card">
+            <div id="summary-proud-notes" class="summary-number">0</div>
+            <div class="summary-label">プラウドノート</div>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <button class="filter-btn active" data-filter="すべて" onclick="setAdminFilter('すべて')">すべて</button>
+          <button class="filter-btn" data-filter="タブレット" onclick="setAdminFilter('タブレット')">タブレット</button>
+          <button class="filter-btn" data-filter="プラウドノート" onclick="setAdminFilter('プラウドノート')">プラウドノート</button>
         </div>
 
         <div class="summary-grid">
@@ -546,35 +595,42 @@
 
       function renderUserInfo(info) {
         document.getElementById('display-name').textContent = info.name + ' さん';
-        document.getElementById('display-device').textContent = info.device || '未登録';
-
-        const statusArea = document.getElementById('status-area');
-        const btnBorrow = document.getElementById('btn-borrow');
-        const btnReturn = document.getElementById('btn-return');
+        const assetList = document.getElementById('asset-list');
         const messageArea = document.getElementById('message-area');
-
         messageArea.innerHTML = '';
+        const assets = info.assets || [];
 
-        if (info.currentStatus === '貸出中') {
-          statusArea.innerHTML = `
-            <div class="status-pill status-borrowing">現在：貸出中</div>
-            <p class="small-note">貸出日時：${escapeHtml(info.borrowAt || '-')}</p>
-          `;
-
-          btnBorrow.classList.add('hidden');
-          btnReturn.classList.remove('hidden');
-        } else {
-          statusArea.innerHTML = `
-            <div class="status-pill status-returned">現在：返却済</div>
-            <p class="small-note">次に利用する場合は「借りる」を押してください。</p>
-          `;
-
-          btnBorrow.classList.remove('hidden');
-          btnReturn.classList.add('hidden');
+        if (!assets.length) {
+          assetList.innerHTML = '<div class="empty">割り当てられた備品がありません。管理者に確認してください。</div>';
+          return;
         }
+
+        assetList.innerHTML = assets.map(function(asset) {
+          const isBorrowing = asset.currentStatus === '貸出中';
+          const action = isBorrowing ? '返却' : '貸出';
+          const buttonClass = isBorrowing ? 'btn-return' : 'btn-borrow';
+          const buttonLabel = isBorrowing ? '返却する' : '借りる';
+          const statusClass = isBorrowing ? 'status-borrowing' : 'status-returned';
+          const note = isBorrowing
+            ? `貸出日時：${escapeHtml(asset.borrowAt || '-')}`
+            : '持ち出す直前に「借りる」を押してください。';
+
+          return `
+            <div class="asset-card">
+              <div class="asset-type">${escapeHtml(asset.type)}</div>
+              <div class="asset-id">${escapeHtml(asset.id)}</div>
+              <div class="status-pill ${statusClass}">現在：${escapeHtml(asset.currentStatus)}</div>
+              <p class="small-note">${note}</p>
+              <button
+                class="btn ${buttonClass} asset-action-button"
+                onclick="doAction('${escapeHtml(asset.type)}', '${action}')"
+              >${buttonLabel}</button>
+            </div>
+          `;
+        }).join('');
       }
 
-      function doAction(actionType) {
+      function doAction(assetType, actionType) {
         const name = localStorage.getItem('tablog_username');
 
         if (!name) {
@@ -608,12 +664,13 @@
             setActionButtonsDisabled(false);
             showError('message-area', error.message || error);
           })
-          .recordLog(name, actionType);
+          .recordLog(name, assetType, actionType);
       }
 
       function setActionButtonsDisabled(disabled) {
-        document.getElementById('btn-borrow').disabled = disabled;
-        document.getElementById('btn-return').disabled = disabled;
+        document.querySelectorAll('.asset-action-button').forEach(function(button) {
+          button.disabled = disabled;
+        });
       }
 
       function resetUser() {
@@ -628,6 +685,9 @@
       // ==============================
       // 管理者画面
       // ==============================
+
+      let adminDashboardData = null;
+      let adminAssetFilter = 'すべて';
 
       function showAdmin() {
         showOnly('view-admin');
@@ -650,13 +710,39 @@
       }
 
       function renderAdminDashboard(data) {
+        adminDashboardData = data;
         document.getElementById('summary-total').textContent = data.summary.total;
         document.getElementById('summary-borrowing').textContent = data.summary.borrowing;
         document.getElementById('summary-returned').textContent = data.summary.returned;
+        document.getElementById('summary-tablets').textContent = data.summary.tablets || 0;
+        document.getElementById('summary-proud-notes').textContent = data.summary.proudNotes || 0;
 
-        renderBorrowingTable(data.borrowing || []);
+        renderFilteredAdminTables();
         renderUsageMonitoring(data.usage || {});
-        renderReturnedTable(data.returned || []);
+      }
+
+      function setAdminFilter(assetType) {
+        adminAssetFilter = assetType;
+
+        document.querySelectorAll('.filter-btn').forEach(function(button) {
+          button.classList.toggle('active', button.dataset.filter === assetType);
+        });
+
+        renderFilteredAdminTables();
+      }
+
+      function renderFilteredAdminTables() {
+        if (!adminDashboardData) return;
+
+        const filterRows = function(rows) {
+          if (adminAssetFilter === 'すべて') return rows || [];
+          return (rows || []).filter(function(row) {
+            return row.assetType === adminAssetFilter;
+          });
+        };
+
+        renderBorrowingTable(filterRows(adminDashboardData.borrowing));
+        renderReturnedTable(filterRows(adminDashboardData.returned));
       }
 
       function renderUsageMonitoring(usage) {
@@ -730,7 +816,7 @@
         const area = document.getElementById('admin-borrowing');
 
         if (!rows.length) {
-          area.innerHTML = '<div class="empty">現在、貸出中の端末はありません。</div>';
+          area.innerHTML = '<div class="empty">現在、貸出中の備品はありません。</div>';
           return;
         }
 
@@ -741,7 +827,8 @@
                 <tr>
                   <th>状態</th>
                   <th>名前</th>
-                  <th>端末</th>
+                  <th>備品種別</th>
+                  <th>管理番号</th>
                   <th>貸出日時</th>
                   <th>経過時間</th>
                 </tr>
@@ -754,6 +841,7 @@
             <tr>
               <td><span class="badge badge-danger">貸出中</span></td>
               <td>${escapeHtml(row.name)}</td>
+              <td>${escapeHtml(row.assetType)}</td>
               <td>${escapeHtml(row.device)}</td>
               <td>${escapeHtml(row.borrowAt || '-')}</td>
               <td>${escapeHtml(row.elapsed || '-')}</td>
@@ -785,7 +873,8 @@
                 <tr>
                   <th>状態</th>
                   <th>名前</th>
-                  <th>端末</th>
+                  <th>備品種別</th>
+                  <th>管理番号</th>
                   <th>貸出日時</th>
                   <th>返却日時</th>
                   <th>最終更新</th>
@@ -799,6 +888,7 @@
             <tr>
               <td><span class="badge badge-ok">返却済</span></td>
               <td>${escapeHtml(row.name)}</td>
+              <td>${escapeHtml(row.assetType)}</td>
               <td>${escapeHtml(row.device)}</td>
               <td>${escapeHtml(row.borrowAt || '-')}</td>
               <td>${escapeHtml(row.returnAt || '-')}</td>

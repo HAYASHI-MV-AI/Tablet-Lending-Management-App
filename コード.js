@@ -12,6 +12,10 @@ const SHEET_USAGE_LOGS = 'usage_logs';
 const SHEET_USAGE_SUMMARY = 'usage_summary';
 const SHEET_USAGE_GUIDE = '説明書_利用監視';
 
+const ASSET_TABLET = 'タブレット';
+const ASSET_PROUD_NOTE = 'プラウドノート';
+const ASSET_TYPES = [ASSET_TABLET, ASSET_PROUD_NOTE];
+
 const TZ = 'Asia/Tokyo';// 通知対象にする経過時間
 const OVERDUE_HOURS = 24;
 const USAGE_MONITOR_DAYS = 30;
@@ -20,11 +24,11 @@ const LOW_USAGE_ACTION_THRESHOLD = 1;
 
 // シート見出し
 const HEADERS = {
-  USERS: ['名前', '割当端末', '本人メール', 'グループ', '有効/無効'],
+  USERS: ['名前', '割当端末', '本人メール', 'グループ', '有効/無効', '割当プラウドノート'],
   GROUPS: ['グループ', 'リーダー名', 'リーダーメール', '有効/無効'],
-  LOGS: ['日時', '名前', '端末', 'アクション', '備考'],
-  STATUS: ['名前', '端末', '現在状態', '貸出日時', '返却日時', '最終更新', '未返却'],
-  USAGE_LOGS: ['日時', '名前', '本人メール', 'グループ', '端末', '操作', '備考'],
+  LOGS: ['日時', '名前', '備品番号', 'アクション', '備考', '備品種別'],
+  STATUS: ['名前', '備品番号', '現在状態', '貸出日時', '返却日時', '最終更新', '未返却', '備品種別'],
+  USAGE_LOGS: ['日時', '名前', '本人メール', 'グループ', '端末', '操作', '備考', '備品種別'],
   USAGE_SUMMARY: ['名前', 'グループ', '端末', '最終利用日時', '30日表示回数', '30日操作回数', '判定', '備考']
 };
 
@@ -101,7 +105,11 @@ function setHeaderIfEmpty_(sheet, headers) {
 
   if (!hasHeader) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return;
   }
+
+  // 既存シートへ新しい末尾列を安全に追加する
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 }
 
 function formatSheet_(sheet) {
@@ -121,6 +129,7 @@ function formatSheet_(sheet) {
     sheet.setColumnWidth(3, 260); // 本人メール
     sheet.setColumnWidth(4, 140); // グループ
     sheet.setColumnWidth(5, 100); // 有効/無効
+    sheet.setColumnWidth(6, 180); // 割当プラウドノート
     return;
   }
 
@@ -140,6 +149,7 @@ function formatSheet_(sheet) {
     sheet.setColumnWidth(3, 120); // 端末
     sheet.setColumnWidth(4, 100); // アクション
     sheet.setColumnWidth(5, 200); // 備考
+    sheet.setColumnWidth(6, 140); // 備品種別
     return;
   }
 
@@ -152,6 +162,7 @@ function formatSheet_(sheet) {
     sheet.setColumnWidth(5, 160); // 返却日時
     sheet.setColumnWidth(6, 160); // 最終更新
     sheet.setColumnWidth(7, 100); // 未返却
+    sheet.setColumnWidth(8, 140); // 備品種別
     return;
   }
 
@@ -164,6 +175,7 @@ function formatSheet_(sheet) {
     sheet.setColumnWidth(5, 120); // 端末
     sheet.setColumnWidth(6, 120); // 操作
     sheet.setColumnWidth(7, 240); // 備考
+    sheet.setColumnWidth(8, 140); // 備品種別
     return;
   }
 
@@ -191,7 +203,7 @@ function getUserList() {
 
   if (lastRow < 2) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, 6).getDisplayValues();
 
   return values
     .filter(row => {
@@ -212,29 +224,32 @@ function getUserInfo(userName) {
     };
   }
 
-  const status = getCurrentStatusByName_(user.name);
-
-  // current_status にまだ行がなければ初期行を作成
-  if (!status) {
-    createInitialStatusRow_(user.name, user.device);
-  }
-
-  const latestStatus = getCurrentStatusByName_(user.name);
-
-  const isBorrowing = latestStatus && latestStatus.currentStatus === '貸出中';
-
   appendUsageLog_(user.name, '画面表示', '営業員画面を表示');
 
   return {
     found: true,
     name: user.name,
-    device: user.device,
     group: user.group,
-    currentStatus: isBorrowing ? '貸出中' : '返却済',
-    nextAction: isBorrowing ? '返却' : '貸出',
-    borrowAt: latestStatus ? formatDateTime_(latestStatus.borrowAt) : '',
-    returnAt: latestStatus ? formatDateTime_(latestStatus.returnAt) : '',
-    updatedAt: latestStatus ? formatDateTime_(latestStatus.updatedAt) : ''
+    assets: getAssignedAssets_(user).map(asset => {
+      let status = getCurrentStatus_(user.name, asset.type);
+
+      if (!status) {
+        createInitialStatusRow_(user.name, asset.id, asset.type);
+        status = getCurrentStatus_(user.name, asset.type);
+      }
+
+      const isBorrowing = status && status.currentStatus === '貸出中';
+
+      return {
+        type: asset.type,
+        id: asset.id,
+        currentStatus: isBorrowing ? '貸出中' : '返却済',
+        nextAction: isBorrowing ? '返却' : '貸出',
+        borrowAt: status ? formatDateTime_(status.borrowAt) : '',
+        returnAt: status ? formatDateTime_(status.returnAt) : '',
+        updatedAt: status ? formatDateTime_(status.updatedAt) : ''
+      };
+    })
   };
 }
 
@@ -242,21 +257,51 @@ function getUserInfo(userName) {
 // 営業員側：貸出・返却処理
 // ==============================
 
-function recordLog(userName, action) {
+function recordLog(userName, assetType, action) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
   try {
     const normalizedAction = normalizeAction_(action);
+    const normalizedAssetType = normalizeAssetType_(assetType);
 
     if (!normalizedAction) {
       throw new Error('不正なアクションです。');
+    }
+
+    if (!normalizedAssetType) {
+      throw new Error('不正な備品種別です。');
     }
 
     const user = findUser_(userName);
 
     if (!user) {
       throw new Error('ユーザーが見つかりません。');
+    }
+
+    const asset = getAssignedAssets_(user).find(item => item.type === normalizedAssetType);
+
+    if (!asset) {
+      throw new Error(`${normalizedAssetType}は割り当てられていません。`);
+    }
+
+    const duplicateOwner = findDuplicateAssetOwner_(user.name, asset);
+
+    if (duplicateOwner) {
+      throw new Error(
+        `${asset.type}「${asset.id}」が${duplicateOwner}さんにも割り当てられています。管理者に確認してください。`
+      );
+    }
+
+    const current = getCurrentStatus_(user.name, normalizedAssetType);
+    const isBorrowing = current && current.currentStatus === '貸出中';
+
+    if (normalizedAction === '貸出' && isBorrowing) {
+      throw new Error(`${normalizedAssetType}はすでに貸出中です。`);
+    }
+
+    if (normalizedAction === '返却' && !isBorrowing) {
+      throw new Error(`${normalizedAssetType}はすでに返却済みです。`);
     }
 
     const now = new Date();
@@ -266,16 +311,17 @@ function recordLog(userName, action) {
     logSheet.appendRow([
       now,
       user.name,
-      user.device,
+      asset.id,
       normalizedAction,
-      ''
+      '',
+      normalizedAssetType
     ]);
 
     // アプリ利用状況の監視ログにも記録する
-    appendUsageLog_(user.name, normalizedAction, '貸出・返却ボタン操作');
+    appendUsageLog_(user.name, normalizedAction, '貸出・返却ボタン操作', normalizedAssetType);
 
     // 2. current_status を更新
-    updateCurrentStatus_(user.name, user.device, normalizedAction, now);
+    updateCurrentStatus_(user.name, asset.id, normalizedAssetType, normalizedAction, now);
 
     const info = getUserInfo(user.name);
 
@@ -293,9 +339,9 @@ function recordLog(userName, action) {
   }
 }
 
-function updateCurrentStatus_(name, device, action, now) {
+function updateCurrentStatus_(name, device, assetType, action, now) {
   const sheet = getSheet_(SHEET_STATUS);
-  const rowNumber = findRowByName_(sheet, name);
+  const rowNumber = findStatusRow_(sheet, name, assetType);
 
   if (rowNumber === -1) {
     if (action === '貸出') {
@@ -306,7 +352,8 @@ function updateCurrentStatus_(name, device, action, now) {
         now,
         '',
         now,
-        true
+        true,
+        assetType
       ]);
     } else {
       sheet.appendRow([
@@ -316,36 +363,39 @@ function updateCurrentStatus_(name, device, action, now) {
         '',
         now,
         now,
-        false
+        false,
+        assetType
       ]);
     }
     return;
   }
 
-  const currentRow = sheet.getRange(rowNumber, 1, 1, 7).getValues()[0];
+  const currentRow = sheet.getRange(rowNumber, 1, 1, 8).getValues()[0];
   const currentBorrowAt = currentRow[3];
 
   if (action === '貸出') {
-    sheet.getRange(rowNumber, 1, 1, 7).setValues([[
+    sheet.getRange(rowNumber, 1, 1, 8).setValues([[
       name,
       device,
       '貸出中',
       now,
       '',
       now,
-      true
+      true,
+      assetType
     ]]);
   }
 
   if (action === '返却') {
-    sheet.getRange(rowNumber, 1, 1, 7).setValues([[
+    sheet.getRange(rowNumber, 1, 1, 8).setValues([[
       name,
       device,
       '返却済',
       currentBorrowAt || '',
       now,
       now,
-      false
+      false,
+      assetType
     ]]);
   }
 }
@@ -355,6 +405,42 @@ function normalizeAction_(action) {
 
   if (value === '貸出') return '貸出';
   if (value === '返却') return '返却';
+
+  return '';
+}
+
+function normalizeAssetType_(assetType) {
+  const value = String(assetType || '').trim();
+  return ASSET_TYPES.includes(value) ? value : '';
+}
+
+function getAssignedAssets_(user) {
+  const assets = [];
+
+  if (user.device && user.device !== '未登録') {
+    assets.push({ type: ASSET_TABLET, id: user.device });
+  }
+
+  if (user.proudNote) {
+    assets.push({ type: ASSET_PROUD_NOTE, id: user.proudNote });
+  }
+
+  return assets;
+}
+
+function findDuplicateAssetOwner_(userName, asset) {
+  const users = Object.values(getUsersMap_());
+
+  for (let i = 0; i < users.length; i++) {
+    const user = users[i];
+    if (user.name === userName) continue;
+
+    const hasSameAsset = getAssignedAssets_(user).some(item => {
+      return item.type === asset.type && item.id === asset.id;
+    });
+
+    if (hasSameAsset) return user.name;
+  }
 
   return '';
 }
@@ -379,17 +465,27 @@ function getAdminDashboard() {
       summary: {
         total: 0,
         borrowing: 0,
-        returned: 0
+        returned: 0,
+        tablets: 0,
+        proudNotes: 0
       },
       usage: usageMonitoring
     };
   }
 
   const users = getUsersMap_();
-  const values = statusSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  const values = statusSheet.getRange(2, 1, lastRow - 1, 8).getValues();
 
   const rows = values
-    .filter(row => String(row[0] || '').trim())
+    .filter(row => {
+      const name = String(row[0] || '').trim();
+      const user = users[name];
+      if (!name || !user) return false;
+
+      const assetType = normalizeAssetType_(row[7]) || ASSET_TABLET;
+      const assetId = String(row[1] || '').trim();
+      return getAssignedAssets_(user).some(asset => asset.type === assetType && asset.id === assetId);
+    })
     .map(row => {
       const name = String(row[0] || '').trim();
       const user = users[name] || {};
@@ -397,6 +493,7 @@ function getAdminDashboard() {
       return {
         name: name,
         device: String(row[1] || '').trim(),
+        assetType: normalizeAssetType_(row[7]) || ASSET_TABLET,
         group: user.group || '',
         currentStatus: String(row[2] || '').trim(),
         borrowAt: formatDateTime_(row[3]),
@@ -432,7 +529,9 @@ function getAdminDashboard() {
     summary: {
       total: rows.length,
       borrowing: borrowing.length,
-      returned: returned.length
+      returned: returned.length,
+      tablets: rows.filter(row => row.assetType === ASSET_TABLET).length,
+      proudNotes: rows.filter(row => row.assetType === ASSET_PROUD_NOTE).length
     },
     usage: usageMonitoring
   };
@@ -495,7 +594,7 @@ function getUsageMonitoringData_() {
   };
 }
 
-function appendUsageLog_(userName, operation, note) {
+function appendUsageLog_(userName, operation, note, assetType) {
   try {
     ensureUsageMonitoringSheets_();
     const user = findUser_(userName);
@@ -510,7 +609,8 @@ function appendUsageLog_(userName, operation, note) {
       user.group || '',
       user.device || '',
       String(operation || '').trim(),
-      String(note || '').trim()
+      String(note || '').trim(),
+      normalizeAssetType_(assetType)
     ]);
   } catch (error) {
     console.error('利用ログの記録に失敗しました: ' + error.message);
@@ -534,20 +634,20 @@ function createUsageMonitoringGuideSheet() {
   const sheet = getOrCreateSheet_(ss, SHEET_USAGE_GUIDE);
 
   const rows = [
-    ['タブレット管理アプリ 利用監視システム 説明書', ''],
+    ['備品貸出管理アプリ 利用監視システム 説明書', ''],
     ['', ''],
-    ['目的', '営業員がタブレット貸出・返却を会社指定のWebアプリで記録しているかを確認し、未利用または利用頻度が少ない営業員を洗い出すための仕組みです。'],
+    ['目的', '営業員がタブレット・プラウドノートの貸出返却を会社指定のWebアプリで記録しているかを確認し、未利用または利用頻度が少ない営業員を洗い出すための仕組みです。'],
     ['', ''],
     ['見る場所', 'WebアプリのURL末尾に ?mode=admin を付けると管理者画面が開きます。管理者画面では現在の貸出状況と利用監視結果を確認できます。'],
     ['保存場所', 'このスプレッドシートに利用ログと集計結果を保存します。'],
     ['', ''],
     ['主なシート', ''],
-    ['users', '営業員マスタです。名前、割当端末、本人メール、グループ、有効/無効を管理します。'],
+    ['users', '営業員マスタです。名前、割当端末、本人メール、グループ、有効/無効、割当プラウドノートを管理します。プラウドノート未配布者は割当列を空欄にします。'],
     ['groups', 'グループマスタです。リーダー名、リーダーメール、通知対象を管理します。'],
     ['logs', '貸出・返却ボタンを押した実操作の履歴です。利用実績として最も信頼する集計元です。'],
     ['usage_logs', '営業員画面を開いた履歴です。画面表示回数の集計元です。'],
     ['usage_summary', '直近30日間の利用状況を営業員ごとに集計した結果です。'],
-    ['current_status', '現在の貸出状態を管理する補助シートです。'],
+    ['current_status', '現在の貸出状態を名前＋備品種別ごとに管理する補助シートです。'],
     ['', ''],
     ['usage_summary の集計元', ''],
     ['営業員一覧', 'users シートから取得します。有効な営業員だけを対象にします。'],
@@ -568,7 +668,7 @@ function createUsageMonitoringGuideSheet() {
     ['setWeeklyUsageMonitoringTrigger', '毎週月曜9時ごろに未利用・低頻度者レポートをリーダーへ送るトリガーを設定します。必要な場合だけ実行してください。'],
     ['', ''],
     ['運用メモ', 'usage_summary は管理者画面を開いた時にも更新されます。正確な一覧をすぐ見たい場合は rebuildUsageSummaryFromLogs を手動実行してください。'],
-    ['注意', 'この仕組みで分かるのは「Webアプリを使った記録」です。タブレット本体を実際に使ったかどうかを直接検知するものではありません。']
+    ['注意', 'この仕組みで分かるのは「Webアプリを使った記録」です。備品を実際に使ったかどうかを直接検知するものではありません。']
   ];
 
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
@@ -758,32 +858,30 @@ function syncCurrentStatusFromUsers() {
 
   if (userLastRow < 2) return;
 
-  const users = userSheet.getRange(2, 1, userLastRow - 1, 5).getValues();
+  const users = userSheet.getRange(2, 1, userLastRow - 1, 6).getDisplayValues();
 
   users.forEach(row => {
     const name = String(row[0] || '').trim();
-    const device = String(row[1] || '').trim();
     const activeStatus = String(row[4] || '').trim();
 
     if (!name) return;
     if (activeStatus === '無効') return;
 
-    const existingRow = findRowByName_(statusSheet, name);
+    const user = {
+      device: String(row[1] || '').trim(),
+      proudNote: String(row[5] || '').trim()
+    };
 
-    if (existingRow === -1) {
-      statusSheet.appendRow([
-        name,
-        device,
-        '返却済',
-        '',
-        '',
-        '',
-        false
-      ]);
-    } else {
-      // users 側で端末名が変わった場合、current_status 側も更新
-      statusSheet.getRange(existingRow, 2).setValue(device);
-    }
+    getAssignedAssets_(user).forEach(asset => {
+      const existingRow = findStatusRow_(statusSheet, name, asset.type);
+
+      if (existingRow === -1) {
+        createInitialStatusRow_(name, asset.id, asset.type);
+      } else {
+        statusSheet.getRange(existingRow, 2).setValue(asset.id);
+        statusSheet.getRange(existingRow, 8).setValue(asset.type);
+      }
+    });
   });
 }
 
@@ -832,7 +930,7 @@ function checkSameDayBorrowingAt2230() {
 
   if (lastRow < 2) return;
 
-  const values = statusSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  const values = statusSheet.getRange(2, 1, lastRow - 1, 8).getValues();
   const todayText = Utilities.formatDate(new Date(), TZ, 'yyyy/MM/dd');
 
   values.forEach(row => {
@@ -840,6 +938,7 @@ function checkSameDayBorrowingAt2230() {
     const device = String(row[1] || '').trim();
     const currentStatus = String(row[2] || '').trim();
     const borrowAt = row[3];
+    const assetType = normalizeAssetType_(row[7]) || ASSET_TABLET;
 
     if (!name) return;
     if (currentStatus !== '貸出中') return;
@@ -856,6 +955,12 @@ function checkSameDayBorrowingAt2230() {
 
     if (!user) return;
 
+    const isStillAssigned = getAssignedAssets_(user).some(asset => {
+      return asset.type === assetType && asset.id === device;
+    });
+
+    if (!isStillAssigned) return;
+
     const groupName = String(user.group || '').trim();
     const groupInfo = groups[groupName];
 
@@ -868,16 +973,17 @@ function checkSameDayBorrowingAt2230() {
 
     const elapsedText = calculateElapsedText_(borrowAt, '貸出中');
 
-    const subject = '【要確認】タブレット未返却のお知らせ';
+    const subject = `【要確認】${assetType}未返却のお知らせ`;
 
     const body =
       'お疲れ様です。\n\n' +
-      '本日貸出されたタブレットが、22:30時点で「貸出中」のままになっています。\n' +
+      `本日貸出された${assetType}が、22:30時点で「貸出中」のままになっています。\n` +
       '返却済みの場合は、WEBアプリから返却処理をお願いします。\n\n' +
       '【対象者】\n' +
       `氏名：${name}\n` +
       `グループ：${groupName || '未設定'}\n` +
-      `端末：${device || '未登録'}\n` +
+      `備品：${assetType}\n` +
+      `管理番号：${device || '未登録'}\n` +
       `貸出日時：${formatDateTime_(borrowAt) || '-'}\n` +
       `経過時間：${elapsedText || '-'}\n\n` +
       '【確認者】\n' +
@@ -900,12 +1006,13 @@ function checkSameDayBorrowingAt2230() {
     if (leaderEmail) {
       const leaderOnlyBody =
         'お疲れ様です。\n\n' +
-        '本日貸出されたタブレットが、22:30時点で「貸出中」のままになっているメンバーがいます。\n' +
+        `本日貸出された${assetType}が、22:30時点で「貸出中」のままになっているメンバーがいます。\n` +
         '状況の確認をお願いします。\n\n' +
         '【対象者】\n' +
         `氏名：${name}\n` +
         `グループ：${groupName || '未設定'}\n` +
-        `端末：${device || '未登録'}\n` +
+        `備品：${assetType}\n` +
+        `管理番号：${device || '未登録'}\n` +
         `貸出日時：${formatDateTime_(borrowAt) || '-'}\n` +
         `経過時間：${elapsedText || '-'}\n\n` +
         '※このメールはシステムからの自動送信です。';
@@ -1024,7 +1131,7 @@ function findUser_(userName) {
 
   if (lastRow < 2) return null;
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, 6).getDisplayValues();
 
   for (let i = 0; i < values.length; i++) {
     const name = String(values[i][0] || '').trim();
@@ -1032,11 +1139,13 @@ function findUser_(userName) {
     const personalEmail = String(values[i][2] || '').trim();
     const group = String(values[i][3] || '').trim();
     const activeStatus = String(values[i][4] || '').trim();
+    const proudNote = String(values[i][5] || '').trim();
 
     if (name === targetName && activeStatus !== '無効') {
       return {
         name: name,
         device: device || '未登録',
+        proudNote: proudNote,
         personalEmail: personalEmail,
         group: group,
         activeStatus: activeStatus || '有効'
@@ -1054,7 +1163,7 @@ function getUsersMap_() {
 
   if (lastRow < 2) return map;
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, 6).getDisplayValues();
 
   values.forEach(row => {
     const name = String(row[0] || '').trim();
@@ -1062,6 +1171,7 @@ function getUsersMap_() {
     const personalEmail = String(row[2] || '').trim();
     const group = String(row[3] || '').trim();
     const activeStatus = String(row[4] || '').trim();
+    const proudNote = String(row[5] || '').trim();
 
     if (!name) return;
     if (activeStatus === '無効') return;
@@ -1069,6 +1179,7 @@ function getUsersMap_() {
     map[name] = {
       name: name,
       device: device,
+      proudNote: proudNote,
       personalEmail: personalEmail,
       group: group,
       activeStatus: activeStatus || '有効'
@@ -1107,13 +1218,13 @@ function getGroupsMap_() {
   return map;
 }
 
-function getCurrentStatusByName_(name) {
+function getCurrentStatus_(name, assetType) {
   const sheet = getSheet_(SHEET_STATUS);
-  const rowNumber = findRowByName_(sheet, name);
+  const rowNumber = findStatusRow_(sheet, name, assetType);
 
   if (rowNumber === -1) return null;
 
-  const row = sheet.getRange(rowNumber, 1, 1, 7).getValues()[0];
+  const row = sheet.getRange(rowNumber, 1, 1, 8).getValues()[0];
 
   return {
     name: row[0],
@@ -1122,11 +1233,12 @@ function getCurrentStatusByName_(name) {
     borrowAt: row[3],
     returnAt: row[4],
     updatedAt: row[5],
-    overdue: row[6]
+    overdue: row[6],
+    assetType: normalizeAssetType_(row[7]) || ASSET_TABLET
   };
 }
 
-function createInitialStatusRow_(name, device) {
+function createInitialStatusRow_(name, device, assetType) {
   const sheet = getSheet_(SHEET_STATUS);
 
   sheet.appendRow([
@@ -1136,22 +1248,26 @@ function createInitialStatusRow_(name, device) {
     '',
     '',
     '',
-    false
+    false,
+    assetType
   ]);
 }
 
-function findRowByName_(sheet, name) {
+function findStatusRow_(sheet, name, assetType) {
   const targetName = String(name || '').trim();
+  const targetAssetType = normalizeAssetType_(assetType);
   const lastRow = sheet.getLastRow();
 
   if (lastRow < 2) return -1;
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
 
   for (let i = 0; i < values.length; i++) {
     const rowName = String(values[i][0] || '').trim();
+    // 旧データの空欄はタブレットとして扱う
+    const rowAssetType = normalizeAssetType_(values[i][7]) || ASSET_TABLET;
 
-    if (rowName === targetName) {
+    if (rowName === targetName && rowAssetType === targetAssetType) {
       return i + 2;
     }
   }
@@ -1212,19 +1328,20 @@ function rebuildCurrentStatusFromUsers() {
   userSheet.getRange('C:C').setNumberFormat('@');
   userSheet.getRange('D:D').setNumberFormat('@');
 
-  // 既存の current_status を名前ごとに退避
+  // 既存の current_status を「名前＋備品種別」ごとに退避
   const oldStatusMap = {};
   const statusLastRow = statusSheet.getLastRow();
 
   if (statusLastRow >= 2) {
-    const oldValues = statusSheet.getRange(2, 1, statusLastRow - 1, 7).getValues();
+    const oldValues = statusSheet.getRange(2, 1, statusLastRow - 1, 8).getValues();
 
     oldValues.forEach(row => {
       const name = String(row[0] || '').trim();
+      const assetType = normalizeAssetType_(row[7]) || ASSET_TABLET;
 
       if (!name) return;
 
-      oldStatusMap[name] = {
+      oldStatusMap[`${name}|${assetType}`] = {
         currentStatus: row[2] || '返却済',
         borrowAt: row[3] || '',
         returnAt: row[4] || '',
@@ -1238,15 +1355,7 @@ function rebuildCurrentStatusFromUsers() {
   statusSheet.clear();
 
   // 見出しを再作成
-  statusSheet.getRange(1, 1, 1, 7).setValues([[
-    '氏名',
-    '割当端末',
-    '現在状態',
-    '貸出日時',
-    '返却日時',
-    '最終更新',
-    '未返却'
-  ]]);
+  statusSheet.getRange(1, 1, 1, HEADERS.STATUS.length).setValues([HEADERS.STATUS]);
 
   // users の表示値を取得する
   // getDisplayValues() を使うことで、2001-1-1 のような端末名を見た目のまま取得しやすくする
@@ -1257,45 +1366,40 @@ function rebuildCurrentStatusFromUsers() {
     return;
   }
 
-  const userDisplayValues = userSheet.getRange(2, 1, userLastRow - 1, 5).getDisplayValues();
+  const userDisplayValues = userSheet.getRange(2, 1, userLastRow - 1, 6).getDisplayValues();
 
   const output = [];
 
   userDisplayValues.forEach(row => {
     const name = String(row[0] || '').trim();
-    const device = String(row[1] || '').trim();
     const activeStatus = String(row[4] || '').trim();
 
     if (!name) return;
     if (activeStatus === '無効') return;
 
-    const old = oldStatusMap[name];
+    const user = {
+      device: String(row[1] || '').trim(),
+      proudNote: String(row[5] || '').trim()
+    };
 
-    if (old) {
+    getAssignedAssets_(user).forEach(asset => {
+      const old = oldStatusMap[`${name}|${asset.type}`];
+
       output.push([
         name,
-        device,
-        old.currentStatus,
-        old.borrowAt,
-        old.returnAt,
-        old.updatedAt,
-        old.currentStatus === '貸出中'
+        asset.id,
+        old ? old.currentStatus : '返却済',
+        old ? old.borrowAt : '',
+        old ? old.returnAt : '',
+        old ? old.updatedAt : '',
+        old ? old.currentStatus === '貸出中' : false,
+        asset.type
       ]);
-    } else {
-      output.push([
-        name,
-        device,
-        '返却済',
-        '',
-        '',
-        '',
-        false
-      ]);
-    }
+    });
   });
 
   if (output.length > 0) {
-    statusSheet.getRange(2, 1, output.length, 7).setValues(output);
+    statusSheet.getRange(2, 1, output.length, HEADERS.STATUS.length).setValues(output);
   }
 
   // 見やすく整える
